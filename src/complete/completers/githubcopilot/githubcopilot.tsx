@@ -1,12 +1,9 @@
 import React from "react";
 import {Completer, Model, Prompt} from "../../complete";
-import {
-	SettingsUI as ProviderSettingsUI,
-	Settings,
-	parse_settings,
-} from "./provider_settings";
-import {editor_version, editor_plugin_version, user_agent, refresh_token_minutes} from "./constants";
-import {parse_settings as parse_model_settings} from "../chatgpt/model_settings"; // TODO Implement my own model settings
+import {parse_settings, Settings, SettingsUI as ProviderSettingsUI,} from "./provider_settings";
+import {editor_plugin_version, editor_version, refresh_token_minutes, user_agent} from "./constants";
+//import {parse_settings as parse_model_settings} from "./model_settings"; // TODO Implement my own model settings
+import {requestUrl} from "obsidian";
 
 let running_token_thread = 0;
 
@@ -34,10 +31,11 @@ export default class CopilotModel implements Model {
 	async get_token() {
 		const api_key = this.provider_settings.api_key;
 		if (api_key === "") {
-			return Promise.resolve("");
+			throw new Error("No API key provided");
 		}
 
-		const resp = await fetch('https://api.github.com/copilot_internal/v2/token', {
+		const response = await requestUrl({
+			url: 'https://api.github.com/copilot_internal/v2/token',
 			method: 'GET',
 			headers: {
 				'authorization': `token ${api_key}`,
@@ -46,7 +44,7 @@ export default class CopilotModel implements Model {
 				'user-agent': user_agent
 			}
 		});
-		this.token = (await resp.json()).token;
+		this.token = (await response.json).token;
 	}
 
 	// Runs forever
@@ -59,7 +57,7 @@ export default class CopilotModel implements Model {
 	}
 
 	async complete(prompt: Prompt, settings: string): Promise<string> {
-		if (this.token === null) {
+		if (this.token === null || this.token === undefined || this.token === "") {
 			await this.get_token();
 		}
 		//const model_settings = parse_model_settings(settings);
@@ -67,16 +65,19 @@ export default class CopilotModel implements Model {
 			max_tokens: 100,
 			temperature: 0
 		};
+
 		try {
-			const response = await fetch('https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions', {
+			const response = await requestUrl({
+				url: 'https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions',
 				method: 'POST',
 				headers: {
 					'Authorization': `Bearer ${this.token}`,
-					'Content-Type': 'application/json'
+					'Content-Type': 'application/json',
+					user_agent: user_agent
 				},
 				body: JSON.stringify({
-					prompt: prompt,
-					suffix: '',
+					prompt: prompt.prefix,
+					suffix: prompt.suffix,
 					max_tokens: model_settings.max_tokens,
 					temperature: model_settings.temperature,
 					top_p: 1,
@@ -89,28 +90,27 @@ export default class CopilotModel implements Model {
 					}
 				})
 			});
-			if (!response.body) {
-				console.error('No response body');
-				return '';
+
+			if (response.status !== 200) {
+				console.error(response);
+				throw new Error(`HTTP error! Status: ${response.status}`);
 			}
-			const reader = response.body.getReader();
-			const decoder = new TextDecoder();
+
+			if (response.text === null) {
+				console.error(response)
+				throw new Error('Response body is empty');
+			}
+
 			let result = '';
 
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				const chunk = decoder.decode(value, { stream: true });
-				const lines = chunk.split('\n');
-				for (const line of lines) {
-					if (line.startsWith('data: {')) {
+			for (const line of response.text.split('\n')) {
+				if (line.startsWith('data: {')) {
+					try {
 						const jsonLine = JSON.parse(line.slice(6));
-						const completion = jsonLine.choices[0].text;
-						if (completion) {
-							result += completion;
-						} else {
-							result += '\n';
-						}
+						const completion = jsonLine.choices[0]?.text || '\n';
+						result += completion;
+					} catch (error) {
+						console.error('Error parsing JSON:', error);
 					}
 				}
 			}

@@ -1,6 +1,6 @@
 import * as React from "react";
 import SettingsItem from "../../../components/SettingsItem";
-import {App, Modal} from "obsidian";
+import {App, Modal, requestUrl} from "obsidian";
 import {editor_version, editor_plugin_version, user_agent, client_id} from "./constants";
 
 class AuthModal extends Modal { // Generated
@@ -15,8 +15,14 @@ class AuthModal extends Modal { // Generated
 
 	onOpen() {
 		const { contentEl } = this;
+		// Todo this looks horrible because it is all on seperate lines
+		// Todo code should be copied on press
 		contentEl.createEl('h2', { text: 'GitHub Authentication' });
-		contentEl.createEl('p', { text: `Please visit ${this.verificationUri} and enter the code \`${this.userCode}\` to authenticate.` });
+		contentEl.createEl('p', { text: 'Please visit '});
+		contentEl.createEl('a', { text: this.verificationUri, href: this.verificationUri })
+		contentEl.createEl('p', { text: ' and enter the code ' });
+		contentEl.createEl('code', { text: this.userCode});
+		contentEl.createEl('p', { text: ' to authenticate.' });
 	}
 
 	onClose() {
@@ -27,7 +33,8 @@ class AuthModal extends Modal { // Generated
 
 async function getAPIkey() { // From reference
 
-	const resp = await fetch('https://github.com/login/device/code', {
+	const resp = await requestUrl({
+		url:'https://github.com/login/device/code',
 		method: 'POST',
 		headers: {
 			'accept': 'application/json',
@@ -43,7 +50,7 @@ async function getAPIkey() { // From reference
 		})
 	});
 
-	const { device_code, user_code, verification_uri } = await resp.json();
+	const { device_code, user_code, verification_uri } = await resp.json;
 
 	//console.log(`Please visit ${verification_uri} and enter code ${user_code} to authenticate.`)
 	// Use an Obsidian modal to show the verification URI and user code
@@ -51,11 +58,11 @@ async function getAPIkey() { // From reference
 
 	let access_token;
 	while (true) {
-		await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for 5 seconds
-
-		// TODO Replace fetch with some node feature to avoid CORS
-		const response = await fetch('https://github.com/login/oauth/access_token', {
-			method: 'POST',
+		await new Promise(resolve => setTimeout(resolve, 5000));
+		// Every 5 secs, see if we are logged in
+		const response = await requestUrl({
+			url:'https://github.com/login/oauth/access_token',
+			method:'POST',
 			headers: {
 				'accept': 'application/json',
 				'editor-version': editor_version,
@@ -71,7 +78,7 @@ async function getAPIkey() { // From reference
 			})
 		});
 
-		access_token = (await response.json()).access_token;
+		access_token = (await response.json).access_token;
 		if (access_token) {
 			return access_token;
 		}
