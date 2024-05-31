@@ -1,9 +1,9 @@
 import * as React from "react";
 import SettingsItem from "../../../components/SettingsItem";
-import {App, Modal, requestUrl} from "obsidian";
-import {editor_version, editor_plugin_version, user_agent, client_id} from "./constants";
+import {App, Modal, Notice, requestUrl} from "obsidian";
+import {client_id, editor_plugin_version, editor_version, user_agent} from "./constants";
 
-class AuthModal extends Modal { // Generated
+class AuthModal extends Modal {
 	verificationUri: string;
 	userCode: string;
 
@@ -15,14 +15,34 @@ class AuthModal extends Modal { // Generated
 
 	onOpen() {
 		const { contentEl } = this;
-		// Todo this looks horrible because it is all on seperate lines
-		// Todo code should be copied on press
-		contentEl.createEl('h2', { text: 'GitHub Authentication' });
-		contentEl.createEl('p', { text: 'Please visit '});
-		contentEl.createEl('a', { text: this.verificationUri, href: this.verificationUri })
-		contentEl.createEl('p', { text: ' and enter the code ' });
-		contentEl.createEl('code', { text: this.userCode});
-		contentEl.createEl('p', { text: ' to authenticate.' });
+		// Create a single paragraph element with mixed content
+		const pElement = contentEl.createEl('p');
+		pElement.append(
+			'Please visit ',
+			Object.assign(document.createElement('a'), {
+				textContent: this.verificationUri,
+				href: this.verificationUri,
+				target: '_blank'
+			}),
+			' and enter the code ',
+			Object.assign(document.createElement('code'), {
+				textContent: this.userCode,
+				id: 'user-code-display',
+				style: 'cursor: pointer;', // Indicate it's clickable
+				title: 'Click to copy'
+			}),
+			' to authenticate.'
+		);
+
+		const doneButton = contentEl.createEl('button', { text: 'Done' });
+		doneButton.addEventListener('click', () => this.close());
+		doneButton.style.marginTop = '10px';
+		doneButton.style.float = 'right';
+
+		// Add a click event to copy the userCode to clipboard
+		const codeElement = document.getElementById('user-code-display');
+		codeElement!.addEventListener('click', () =>
+			navigator.clipboard.writeText(this.userCode));
 	}
 
 	onClose() {
@@ -57,7 +77,10 @@ async function getAPIkey() { // From reference
 	new AuthModal(this.app, verification_uri, user_code).open();
 
 	let access_token;
-	while (true) {
+	const startTime = Date.now();
+	const duration = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+	while (Date.now() - startTime < duration) {
 		await new Promise(resolve => setTimeout(resolve, 5000));
 		// Every 5 secs, see if we are logged in
 		const response = await requestUrl({
@@ -83,6 +106,9 @@ async function getAPIkey() { // From reference
 			return access_token;
 		}
 	}
+	// Give feedback that no token was received
+	new Notice('No Copilot token received for 10 minutes.');
+	throw new Error('No Copilot token received for 10 minutes.');
 }
 
 
@@ -115,7 +141,7 @@ export function SettingsUI({
 	return (
 		<>
 			<SettingsItem
-				name="CopilotLogin"
+				name="Copilot Login"
 				description={
 					<>
 						Get a Github Copilot API key.
@@ -142,7 +168,7 @@ export function SettingsUI({
 				}}>Login</button>
 			</SettingsItem>
 			<SettingsItem
-				name="CopilotLogout"
+				name="Copilot Logout"
 				description={
 					<>
 						Remove current Github Copilot API key.
@@ -160,6 +186,30 @@ export function SettingsUI({
 						document.getElementById("copilot-logout-button")!.setAttribute("disabled", "true");
 						document.getElementById("copilot-login-button")!.removeAttribute("disabled");
 				}}>Logout</button>
+			</SettingsItem>
+
+			<SettingsItem
+				name="API Key"
+				description={
+					<>
+						API Key for Github Copilot.
+					</>
+				}
+			>
+				<input
+					type="text"
+					value={parse_settings(settings).api_key}
+					onChange={(e) => {
+						saveSettings(JSON.stringify({api_key: e.target.value}))
+						if (e.target.value == "") {
+							document.getElementById("copilot-login-button")!.removeAttribute("disabled");
+							document.getElementById("copilot-logout-button")!.setAttribute("disabled", "true");
+						} else {
+							document.getElementById("copilot-login-button")!.setAttribute("disabled", "true");
+							document.getElementById("copilot-logout-button")!.removeAttribute("disabled");
+						}
+					}}
+				/>
 			</SettingsItem>
 		</>
 	);
